@@ -1,6 +1,10 @@
 use bollard::{API_DEFAULT_VERSION, Docker, query_parameters::LogsOptionsBuilder};
-use futures::{StreamExt};
-use gader_agent::parsers::{LogParser, immich, vaultwarden};
+use futures::StreamExt;
+use gader_agent::parsers::{LogEntry, LogParser, immich, vaultwarden};
+use tokio::{
+    sync::mpsc::channel,
+    time::{self, Duration},
+};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -18,11 +22,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .tail("30")
         .build();
 
+    let (tx, mut rx) = channel::<LogEntry>(500);
+
     // clones are cheap here
+    let tx_immich = tx.clone();
     let docker_immich = docker_connection.clone();
     let params_immich = params.clone();
 
-    let task_immich = tokio::spawn(async move {
+    let _task_immich = tokio::spawn(async move {
         let mut immich_logs = docker_immich.logs("immich_server", Some(params_immich));
 
         let immich_parser = immich::ImmichParser::new();
@@ -32,16 +39,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let raw_log = log_output.to_string();
 
                 if let Some(log) = immich_parser.parse(&raw_log) {
-                    println!("{:?}", log);
+                    //println!("{:?}", log);
+                    let _ = tx_immich.send(log).await;
                 }
             }
         }
     });
 
+    let tx_vw = tx.clone();
     let docker_vw = docker_connection.clone();
     let params_vw = params.clone();
 
-    let task_vw = tokio::spawn(async move {
+    let _task_vw = tokio::spawn(async move {
         let mut vw_logs = docker_vw.logs("vaultwarden", Some(params_vw));
 
         let vw_parser = vaultwarden::VWParser::new();
@@ -53,13 +62,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // println!("{:?}", raw_log);
 
                 if let Some(log) = vw_parser.parse(&raw_log) {
-                    println!("{:?}", log);
+                    //println!("{:?}", log);
+                    let _ = tx_vw.send(log).await;
                 }
             }
         }
     });
 
-    let _ = tokio::join!(task_immich, task_vw);
+    drop(tx);
+
+    let mut batch: Vec<LogEntry> = Vec::with_capacity(10);
+    let mut interval = time::interval(Duration::from_secs(5));
+
+    loop { // consumer loop
+        tokio::select! {
+            Some(entry) = rx.recv() => {
+                batch.push(entry);
+                if batch.len() >= 10 {
+                    println!("--- BATCH FULL ({} items) ---", batch.len());
+                    for log in &batch {
+                        println!(">> {}", log);
+                    }
+                    batch.clear();
+                }
+            }
+
+            _ = interval.tick() => {
+                if !batch.is_empty() {
+                    println!("--- TIMEOUT FLUSH ({} items) ---", batch.len());
+                    for log in &batch {
+                        println!(">> {}", log);
+                    }
+                    batch.clear();
+                }
+            }
+
+            else => break,
+        }
+    }
 
     Ok(())
 }

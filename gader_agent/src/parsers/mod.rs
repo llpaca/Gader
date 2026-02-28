@@ -1,6 +1,6 @@
-use std::fmt::{Display, self};
+use std::fmt::{self, Display};
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 pub mod immich;
 pub mod vaultwarden;
@@ -23,12 +23,12 @@ impl Display for LogEntry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Format: [2024-02-28 12:00] [IMMICH] [INFO] (Context) Message
         write!(
-            f, 
-            "[{}] [{}] [{}] ({}) {}", 
-            self.timestamp, 
-            self.service.to_uppercase(), 
-            self.level, 
-            self.context, 
+            f,
+            "[{}] [{}] [{}] ({}) {}",
+            self.timestamp,
+            self.service.to_uppercase(),
+            self.level,
+            self.context,
             self.message
         )
     }

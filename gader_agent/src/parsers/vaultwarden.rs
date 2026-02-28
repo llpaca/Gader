@@ -1,6 +1,6 @@
 use regex::Regex;
 
-use super::{LogParser, LogEntry};
+use super::{LogEntry, LogParser};
 
 pub struct VWParser {
     ansi_re: Regex,
@@ -11,7 +11,10 @@ impl VWParser {
     pub fn new() -> Self {
         Self {
             ansi_re: Regex::new(r"\x1b\[[0-9;]*m").expect("Invalid ANSI regex"),
-            log_re: Regex::new(r"^\[(?P<time>[^\]]+)\]\[(?P<context>[^\]]+)\]\[(?P<level>[^\]]+)\]\s+(?P<msg>.+)").expect("Invalid Vaultwarden regex"),
+            log_re: Regex::new(
+                r"^\[(?P<time>[^\]]+)\]\[(?P<context>[^\]]+)\]\[(?P<level>[^\]]+)\]\s+(?P<msg>.+)",
+            )
+            .expect("Invalid Vaultwarden regex"),
         }
     }
 
@@ -21,9 +24,7 @@ impl VWParser {
 }
 
 impl LogParser for VWParser {
-
     fn parse(&self, line: &str) -> Option<LogEntry> {
-
         let clean_line = self.strip_ansi(line);
 
         if let Some(caps) = self.log_re.captures(&clean_line) {
@@ -47,5 +48,11 @@ impl LogParser for VWParser {
         }
 
         None
+    }
+}
+
+impl Default for VWParser {
+    fn default() -> Self {
+        Self::new()
     }
 }

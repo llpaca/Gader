@@ -216,6 +216,7 @@ dependencies = [
  "bollard",
  "futures",
  "regex",
+ "serde",
  "tokio",
 ]
 

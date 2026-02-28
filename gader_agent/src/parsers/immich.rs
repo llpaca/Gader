@@ -1,6 +1,6 @@
 use regex::Regex;
 
-use super::{LogParser, LogEntry};
+use super::{LogEntry, LogParser};
 
 pub struct ImmichParser {
     ansi_re: Regex,
@@ -23,13 +23,10 @@ impl ImmichParser {
 }
 
 impl LogParser for ImmichParser {
-
     fn parse(&self, line: &str) -> Option<LogEntry> {
-        
         let clean_line = self.strip_ansi(line);
 
         if let Some(caps) = self.log_re.captures(&clean_line) {
-
             let ts = caps["time"].to_string();
 
             *self.last_timestamp.borrow_mut() = ts.clone();
@@ -47,13 +44,19 @@ impl LogParser for ImmichParser {
         if !clean_line.trim().is_empty() {
             return Some(LogEntry {
                 service: "immich".to_string(),
-                timestamp: self.last_timestamp.borrow().clone(), 
-                level: "RAW".to_string(),       
+                timestamp: self.last_timestamp.borrow().clone(),
+                level: "RAW".to_string(),
                 context: "Trace".to_string(),
-                message: clean_line, 
+                message: clean_line,
             });
         }
 
         None
+    }
+}
+
+impl Default for ImmichParser {
+    fn default() -> Self {
+        Self::new()
     }
 }
