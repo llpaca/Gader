@@ -1,6 +1,6 @@
 use bollard::{API_DEFAULT_VERSION, Docker, query_parameters::LogsOptionsBuilder};
 use futures::{StreamExt};
-use regex::Regex;
+use gader_agent::parsers::{LogParser, immich, vaultwarden};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -10,45 +10,56 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // services to watch out for
     // immich and vaultwarden
-    let immich: String = String::from("immich_server");
-    let _vw: String = String::from("vaultwarden");
 
     let params = LogsOptionsBuilder::new()
         .follow(true)
         .stderr(true)
         .stdout(true)
-        .tail("7")
+        .tail("30")
         .build();
 
-    let mut immich_logs = docker_connection.logs(immich.as_str(), Some(params));
+    // clones are cheap here
+    let docker_immich = docker_connection.clone();
+    let params_immich = params.clone();
 
-    let log_pattern = r"\[Nest\]\s+\d+\s+-\s+(?P<time>\d{2}/\d{2}/\d{4},\s+\d{1,2}:\d{2}:\d{2}\s+[AP]M)\s+(?P<level>[A-Z]+)\s+\[(?P<context>[^\]]+)\]\s+(?P<msg>.+)";
+    let task_immich = tokio::spawn(async move {
+        let mut immich_logs = docker_immich.logs("immich_server", Some(params_immich));
 
-    let ansi_re = Regex::new(r"\x1b\[[0-9;]*m")?;
+        let immich_parser = immich::ImmichParser::new();
 
-    let re = Regex::new(log_pattern)?;
+        while let Some(res) = immich_logs.next().await {
+            if let Ok(log_output) = res {
+                let raw_log = log_output.to_string();
 
-    // we need to stream this
-    while let Some(res) = immich_logs.next().await {
-        match res {
-            Ok(log_output) => {
-                println!("{}", log_output);
-
-                let lg_output = log_output.to_string();
-                let stripped_ansi = ansi_re.replace_all(&lg_output, "").to_string();
-                
-                if let Some(caps) = re.captures(&stripped_ansi.as_str()) {
-                    println!("Time: {}", &caps["time"]);
-                    println!("Level: {}", &caps["level"]);
-                    println!("Context: {}", &caps["context"]);
-                    println!("Message: {} \n\n", &caps["msg"]);
+                if let Some(log) = immich_parser.parse(&raw_log) {
+                    println!("{:?}", log);
                 }
             }
-            Err(e) => {
-                println!("Error: {}", e);
+        }
+    });
+
+    let docker_vw = docker_connection.clone();
+    let params_vw = params.clone();
+
+    let task_vw = tokio::spawn(async move {
+        let mut vw_logs = docker_vw.logs("vaultwarden", Some(params_vw));
+
+        let vw_parser = vaultwarden::VWParser::new();
+
+        while let Some(res) = vw_logs.next().await {
+            if let Ok(log_output) = res {
+                let raw_log = log_output.to_string();
+
+                // println!("{:?}", raw_log);
+
+                if let Some(log) = vw_parser.parse(&raw_log) {
+                    println!("{:?}", log);
+                }
             }
         }
-    }
+    });
+
+    let _ = tokio::join!(task_immich, task_vw);
 
     Ok(())
 }
