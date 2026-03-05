@@ -1,3 +1,5 @@
+use core::convert::Into;
+
 use regex::Regex;
 
 use super::{LogEntry, LogParser};
@@ -27,27 +29,27 @@ impl LogParser for ImmichParser {
         let clean_line = self.strip_ansi(line);
 
         if let Some(caps) = self.log_re.captures(&clean_line) {
-            let ts = caps["time"].to_string();
+            let ts = &caps["time"];
 
-            *self.last_timestamp.borrow_mut() = ts.clone();
+            *self.last_timestamp.borrow_mut() = ts.to_string();
 
             return Some(LogEntry {
-                service: "immich".to_string(),
-                timestamp: ts,
-                level: caps["level"].to_string(),
-                context: caps["context"].to_string(),
-                message: caps["msg"].to_string(),
+                service: "immich".into(),
+                timestamp: ts.into(),
+                level: caps["level"].into(),
+                context: caps["context"].into(),
+                message: caps["msg"].into(),
             });
         }
 
         // if it is a stacktrace
         if !clean_line.trim().is_empty() {
             return Some(LogEntry {
-                service: "immich".to_string(),
-                timestamp: self.last_timestamp.borrow().clone(),
-                level: "RAW".to_string(),
-                context: "Trace".to_string(),
-                message: clean_line,
+                service: "immich".into(),
+                timestamp: self.last_timestamp.borrow().clone().into(),
+                level: "RAW".into(),
+                context: "Trace".into(),
+                message: clean_line.into(),
             });
         }
 

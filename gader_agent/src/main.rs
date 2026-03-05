@@ -1,4 +1,5 @@
 use core::{
+    default::Default,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     time::Duration,
 };
@@ -9,7 +10,7 @@ use bollard::{API_DEFAULT_VERSION, Docker, query_parameters::LogsOptionsBuilder}
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use gader_agent::{
-    cert,
+    AppState, cert,
     parsers::{LogParser, immich, vaultwarden},
 };
 use gader_common::{LogEntry, NetworkPacket};
@@ -35,6 +36,8 @@ async fn main() -> Result<()> {
     let server_endpoint = get_connection_endpoint().context("Error in making endpoint")?;
     info!("got server connection endpoint");
 
+    let state = Arc::new(AppState::default());
+
     let (tx, _) = broadcast::channel::<LogEntry>(1000);
     let c_token = CancellationToken::new();
 
@@ -43,6 +46,7 @@ async fn main() -> Result<()> {
     let tx_immich = tx.clone();
     let docker_immich = docker_conn.clone();
     let c_im = c_token.clone();
+    let state_im = state.clone();
     let _task_immich = tokio::spawn(async move {
         let immich_parser = immich::ImmichParser::new();
         spawn_watcher(
@@ -51,6 +55,7 @@ async fn main() -> Result<()> {
             immich_parser,
             tx_immich,
             c_im,
+            state_im,
         )
         .await;
     });
@@ -58,13 +63,15 @@ async fn main() -> Result<()> {
     let tx_vw = tx.clone();
     let docker_vw = docker_conn.clone();
     let c_vw = c_token.clone();
+    let state_vw = state.clone();
     let _task_vw = tokio::spawn(async move {
         let vw_parser = vaultwarden::VWParser::new();
-        spawn_watcher(docker_vw, "vaultwarden", vw_parser, tx_vw, c_vw).await;
+        spawn_watcher(docker_vw, "vaultwarden", vw_parser, tx_vw, c_vw, state_vw).await;
     });
 
     let tx_ntwk = tx.clone();
     let c_accept = c_token.clone();
+    let state_accept = state.clone();
 
     tokio::spawn(async move {
         info!("Awaiting connections");
@@ -72,8 +79,9 @@ async fn main() -> Result<()> {
             info!("Accepting a client");
             let tx_curr_client = tx_ntwk.clone();
             let c_client = c_accept.clone();
+            let state_client = state_accept.clone();
             tokio::spawn(async move {
-                handle_client(conn, tx_curr_client, c_client).await;
+                handle_client(conn, tx_curr_client, c_client, state_client).await;
             });
         }
     });
@@ -121,6 +129,7 @@ async fn spawn_watcher<P: LogParser>(
     parser: P,
     tx: broadcast::Sender<LogEntry>,
     c_token: CancellationToken,
+    state: Arc<AppState>,
 ) {
     info!("Watching: {}", name);
     let params = LogsOptionsBuilder::new()
@@ -132,15 +141,6 @@ async fn spawn_watcher<P: LogParser>(
 
     let mut stream = docker.logs(name, Some(params));
 
-    while let Some(Ok(log)) = stream.next().await {
-        debug!("{:?}", log);
-
-        if let Some(entry) = parser.parse(&log.to_string()) {
-            debug!("Receiving logs!");
-            let _ = tx.send(entry);
-        }
-    }
-
     loop {
         tokio::select! {
             recv_stream = stream.next() => {
@@ -150,6 +150,7 @@ async fn spawn_watcher<P: LogParser>(
 
                         if let Some(entry) = parser.parse(&log.to_string()) {
                             debug!("Receiving logs!");
+                            state.add_log(entry.clone());
                             let _ = tx.send(entry);
                         }
                     }
@@ -169,10 +170,11 @@ async fn handle_client(
     conn: quinn::Incoming,
     tx: broadcast::Sender<LogEntry>,
     c_token: CancellationToken,
+    state: Arc<AppState>,
 ) {
     let connection = match conn.await {
         Ok(c) => {
-            debug!("handshake successfull");
+            debug!("Handshake successful");
             c
         }
         Err(e) => {
@@ -202,6 +204,14 @@ async fn handle_client(
 
     let mut filter: Option<String> = None;
     let mut flush_timer = tokio::time::interval(tokio::time::Duration::from_millis(500));
+
+    let history = state.get_snapshot();
+    if !history.is_empty() {
+        let packet = NetworkPacket::Batch(history);
+        if let Ok(data) = postcard::to_stdvec(&packet) {
+            writer.send(Bytes::from(data)).await.ok();
+        }
+    }
 
     loop {
         tokio::select! {

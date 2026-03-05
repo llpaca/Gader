@@ -1,15 +1,18 @@
 use core::option::Option;
-use std::fmt::{self, Display};
+use std::{
+    fmt::{self, Display},
+    sync::Arc,
+};
 
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
-    pub service: String,
-    pub timestamp: String,
-    pub level: String,
-    pub context: String,
-    pub message: String,
+    pub service: Arc<str>,
+    pub timestamp: Arc<str>,
+    pub level: Arc<str>,
+    pub context: Arc<str>,
+    pub message: Arc<str>,
 }
 
 impl Display for LogEntry {

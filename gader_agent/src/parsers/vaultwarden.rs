@@ -1,3 +1,5 @@
+use core::convert::Into;
+
 use regex::Regex;
 
 use super::{LogEntry, LogParser};
@@ -29,21 +31,21 @@ impl LogParser for VWParser {
 
         if let Some(caps) = self.log_re.captures(&clean_line) {
             return Some(LogEntry {
-                service: "vaultwarden".to_string(),
-                timestamp: caps["time"].to_string(),
-                level: caps["level"].to_string(),
-                context: caps["context"].to_string(),
-                message: caps["msg"].to_string(),
+                service: "vaultwarden".into(),
+                timestamp: caps["time"].into(),
+                level: caps["level"].into(),
+                context: caps["context"].into(),
+                message: caps["msg"].into(),
             });
         }
 
         if !clean_line.trim().is_empty() {
             return Some(LogEntry {
-                service: "vaultwarden".to_string(),
-                timestamp: "Unknown".to_string(),
-                level: "RAW".to_string(),
-                context: "General".to_string(),
-                message: clean_line,
+                service: "vaultwarden".into(),
+                timestamp: "Unknown".into(),
+                level: "RAW".into(),
+                context: "General".into(),
+                message: clean_line.into(),
             });
         }
 
