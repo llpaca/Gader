@@ -1,5 +1,4 @@
 use core::{
-    convert::TryInto,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     time::Duration,
 };
@@ -14,7 +13,7 @@ use gader_agent::{
     parsers::{LogParser, immich, vaultwarden},
 };
 use gader_common::{LogEntry, NetworkPacket};
-use quinn::{Endpoint, ServerConfig, TransportConfig, VarInt};
+use quinn::{Endpoint, ServerConfig, TransportConfig};
 use tokio::sync::broadcast;
 use tokio_util::codec::{FramedRead, FramedWrite, length_delimited::LengthDelimitedCodec};
 
@@ -95,9 +94,7 @@ fn get_connection_endpoint() -> Result<Endpoint> {
     let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 23456);
 
     let mut transport_config = TransportConfig::default();
-    transport_config.max_concurrent_bidi_streams(VarInt::from_u32(10).into());
-    transport_config.max_idle_timeout(Some(Duration::from_secs(30).try_into()?));
-    transport_config.keep_alive_interval(Some(Duration::from_secs(20).try_into()?));
+    transport_config.keep_alive_interval(Some(Duration::from_secs(20)));
 
     let mut quic_server_config = ServerConfig::with_crypto(Arc::new(quic_crypto));
 
@@ -126,10 +123,11 @@ async fn spawn_watcher<P: LogParser>(
     let mut stream = docker.logs(name, Some(params));
 
     while let Some(Ok(log)) = stream.next().await {
-        println!("{:?}", log);
+        //println!("{:?}", log);
 
         if let Some(entry) = parser.parse(&log.to_string()) {
-            println!("{:?}", entry);
+            // println!("{:?}", entry);
+            //println!("Receiving logs!"); // getting till here -- logs show up properly
             let _ = tx.send(entry);
         }
     }
@@ -150,6 +148,7 @@ async fn handle_client(conn: quinn::Incoming, tx: broadcast::Sender<LogEntry>) {
 
     let (send_stream, recv_stream) = match connection.accept_bi().await {
         Ok(s) => {
+            // unable to get to this point
             println!("Received bi-stream: {:#?}", s);
             s
         }
@@ -214,7 +213,7 @@ async fn handle_client(conn: quinn::Incoming, tx: broadcast::Sender<LogEntry>) {
                 }
             }
 
-            // recv stuff
+            // recv stuff from the client
             packet_res = reader.next() => {
 
                 match packet_res {

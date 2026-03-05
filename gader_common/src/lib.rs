@@ -33,7 +33,7 @@ pub enum NetworkPacket {
         secret_token: String,
         version: u32,
     },
-    HackshakeAck {
+    HandshakeAck {
         accepted: bool,
     },
     Batch(Vec<LogEntry>),

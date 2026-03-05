@@ -1,3 +1,4 @@
+#![allow(clippy::collapsible_if, clippy::collapsible_match)]
 use std::{net::SocketAddr, sync::Arc};
 
 use anyhow::{Context, Result};
@@ -26,7 +27,7 @@ async fn main() -> Result<()> {
 
     crypto.alpn_protocols = vec![b"gader-v1".to_vec()];
 
-    // this implements quinn::crypto::ClientConfig
+    // QuicClientConfig implements quinn::crypto::ClientConfig
     let quic_client_config = quinn::crypto::rustls::QuicClientConfig::try_from(crypto)?;
 
     let client_config = ClientConfig::new(Arc::new(quic_client_config));
@@ -52,28 +53,23 @@ async fn main() -> Result<()> {
     let mut writer = FramedWrite::new(send_stream, LengthDelimitedCodec::new());
     let mut reader = FramedRead::new(recv_stream, LengthDelimitedCodec::new());
 
-    //println!("Sending Filter Command: immich_server");
-    // let filter_cmd = NetworkPacket::UpdateFilter {
-    //     service: Some("immich_server".to_string()),
-    //     level: None,
-    // };
-    //
-    // let cmd_bytes = postcard::to_stdvec(&filter_cmd)?;
-    // writer.send(Bytes::from(cmd_bytes)).await?;
+    // Send an initial packet to materialize the QUIC stream on the server.
+    // In QUIC, a stream only becomes visible to the peer when a STREAM frame
+    // is sent. Without this, the server's accept_bi() would block forever.
+    let init_packet = NetworkPacket::KeepAlive;
+    let init_bytes = postcard::to_stdvec(&init_packet)?;
+    writer.send(Bytes::from(init_bytes)).await?;
 
     println!("Listening for logs...");
     while let Some(msg) = reader.next().await {
         match msg {
             Ok(bytes) => {
                 if let Ok(packet) = postcard::from_bytes::<NetworkPacket>(&bytes) {
-                    match packet {
-                        NetworkPacket::Batch(logs) => {
-                            println!("getting a network packet");
-                            for log in logs {
-                                println!("[{}] {}", log.service, log.message);
-                            }
+                    if let NetworkPacket::Batch(logs) = packet {
+                        println!("getting a network packet");
+                        for log in logs {
+                            println!("[{}] {}", log.service, log.message);
                         }
-                        _ => {}
                     }
                 }
             }
