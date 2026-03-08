@@ -4,7 +4,7 @@ use crossterm::event::KeyCode;
 use gader_common::{LogEntry, NetworkPacket};
 use ratatui::widgets::TableState;
 
-pub const LEVELS: &[&str] = &["All", "DEBUG", "INFO", "WARN", "ERROR", "LOG"];
+pub const LEVELS: &[&str] = &["All", "DEBUG", "INFO", "WARN", "ERROR"];
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum View {
@@ -63,8 +63,14 @@ impl App {
                 return false;
             }
         }
-        if self.active_level != 0 && !log.level.eq_ignore_ascii_case(LEVELS[self.active_level]) {
-            return false;
+        if self.active_level != 0 {
+            let target = LEVELS[self.active_level];
+            let matches = log.level.eq_ignore_ascii_case(target)
+                || (target.eq_ignore_ascii_case("INFO")
+                    && log.level.eq_ignore_ascii_case("LOG"));
+            if !matches {
+                return false;
+            }
         }
         if !search_lower.is_empty() {
             let in_msg = log.message.to_ascii_lowercase().contains(search_lower);
