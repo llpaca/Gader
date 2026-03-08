@@ -1,6 +1,6 @@
 use core::{
     default::Default,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
+    net::SocketAddr,
     time::Duration,
 };
 use std::sync::Arc;
@@ -8,6 +8,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use bollard::{API_DEFAULT_VERSION, Docker, query_parameters::LogsOptionsBuilder};
 use bytes::Bytes;
+use clap::Parser;
 use futures::{SinkExt, StreamExt};
 use gader_agent::{
     AppState, cert, config,
@@ -23,18 +24,32 @@ use tokio_util::{
 };
 use tracing::{debug, error, info};
 
+#[derive(Parser)]
+#[command(name = "gader-agent", about = "Gader log collection agent")]
+struct Args {
+    /// Address and port to listen on for TUI client connections
+    #[arg(short, long, default_value = "0.0.0.0:23456")]
+    listen: SocketAddr,
+
+    /// Docker HTTP endpoint URL
+    #[arg(short, long, default_value = "http://127.0.0.1:2375")]
+    docker: String,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
+
+    let args = Args::parse();
 
     rustls::crypto::ring::default_provider()
         .install_default()
         .expect("Failed to install rustls crypto provider");
 
-    let docker_conn = Docker::connect_with_http("http://127.0.0.1:2375", 5, API_DEFAULT_VERSION)
+    let docker_conn = Docker::connect_with_http(&args.docker, 5, API_DEFAULT_VERSION)
         .expect("Unable to connect to docker");
 
-    let server_endpoint = get_connection_endpoint().context("Error in making endpoint")?;
+    let server_endpoint = get_connection_endpoint(args.listen).context("Error in making endpoint")?;
     info!("got server connection endpoint");
 
     let secret = config::load_secret().context("Failed to load secret")?;
@@ -92,7 +107,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn get_connection_endpoint() -> Result<Endpoint> {
+fn get_connection_endpoint(socket_addr: SocketAddr) -> Result<Endpoint> {
     let (cert_chain, key_der) =
         cert::load_or_generate_keys().context("Failed to load/generate TLS keys")?;
 
@@ -104,8 +119,6 @@ fn get_connection_endpoint() -> Result<Endpoint> {
     crypto.alpn_protocols = vec![b"gader-v1".to_vec()];
 
     let quic_crypto = quinn::crypto::rustls::QuicServerConfig::try_from(crypto)?;
-
-    let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 23456);
 
     let mut transport_config = TransportConfig::default();
     transport_config.keep_alive_interval(Some(Duration::from_secs(20)));

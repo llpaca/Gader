@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 
 use anyhow::{Context, Result, bail};
 use bytes::Bytes;
+use clap::Parser;
 use futures::{SinkExt, StreamExt};
 use gader_common::NetworkPacket;
 use gader_tui::{
@@ -12,16 +13,34 @@ use gader_tui::{
 use tokio_util::codec::{FramedRead, FramedWrite, length_delimited::LengthDelimitedCodec};
 use tracing::{debug, error, info};
 
+#[derive(Parser)]
+#[command(name = "gader", about = "Gader TUI log viewer")]
+struct Args {
+    /// Gader agent address to connect to
+    #[arg(short, long, default_value = "127.0.0.1:23456")]
+    server: SocketAddr,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    //tracing_subscriber::fmt::init(); // TODO: look into this -- make it write into a log file
+    let home = std::env::var("HOME").context("HOME env var not set")?;
+    let log_dir = std::path::PathBuf::from(home).join(".gader");
+    std::fs::create_dir_all(&log_dir).context("Failed to create ~/.gader")?;
+    let file_appender = tracing_appender::rolling::never(&log_dir, "tui_logs");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    tracing_subscriber::fmt()
+        .with_writer(non_blocking)
+        .with_ansi(false)
+        .init();
+
     tui::install_panic_hook();
     let mut app = App::new();
 
+    let args = Args::parse();
     let client_secret = config::load_secret().context("Failed to load client secret")?;
     let endpoint = get_endpoint()?;
 
-    let server_addr: SocketAddr = "127.0.0.1:23456".parse()?;
+    let server_addr = args.server;
 
     let connection = endpoint
         .connect(server_addr, "localhost")?
