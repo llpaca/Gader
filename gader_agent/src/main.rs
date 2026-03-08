@@ -69,30 +69,23 @@ async fn main() -> Result<()> {
         spawn_watcher(docker_vw, "vaultwarden", vw_parser, tx_vw, c_vw, state_vw).await;
     });
 
-    let tx_ntwk = tx.clone();
-    let c_accept = c_token.clone();
-    let state_accept = state.clone();
-
-    tokio::spawn(async move {
-        info!("Awaiting connections");
-        while let Some(conn) = server_endpoint.accept().await {
-            info!("Accepting a client");
-            let tx_curr_client = tx_ntwk.clone();
-            let c_client = c_accept.clone();
-            let state_client = state_accept.clone();
-            tokio::spawn(async move {
-                handle_client(conn, tx_curr_client, c_client, state_client).await;
-            });
+    info!("Awaiting connections");
+    loop {
+        tokio::select! {
+            Some(conn) = server_endpoint.accept() => {
+                info!("Accepting a client");
+                tokio::spawn(handle_client(conn, tx.clone(), c_token.clone(), state.clone()));
+            }
+            _ = tokio::signal::ctrl_c() => {
+                info!("SIGINT received, cancelling tasks...");
+                c_token.cancel();
+                break;
+            }
         }
-    });
+    }
 
-    tokio::signal::ctrl_c().await?;
-    info!("SIGINT received, cancelling tasks...");
-
-    c_token.cancel();
-
-    // wait for remaining logs to flush
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    // wait for all QUIC connections to send CONNECTION_CLOSE and drain cleanly
+    server_endpoint.wait_idle().await;
 
     Ok(())
 }

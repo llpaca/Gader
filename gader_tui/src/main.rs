@@ -16,8 +16,6 @@ use tracing::{debug, info};
 async fn main() -> Result<()> {
     //tracing_subscriber::fmt::init(); // TODO: look into this
     tui::install_panic_hook();
-    let mut terminal = tui::init_terminal()?;
-    let mut key_reader = crossterm::event::EventStream::new();
     let mut app = App::new();
 
     let endpoint = get_endpoint()?;
@@ -37,6 +35,9 @@ async fn main() -> Result<()> {
         .context("Failed to initiate bi-stream")?;
 
     debug!("Bi-directional stream successfully established");
+
+    let mut terminal = tui::init_terminal()?;
+    let mut key_reader = crossterm::event::EventStream::new();
 
     let mut writer = FramedWrite::new(send_stream, LengthDelimitedCodec::new());
     let mut reader = FramedRead::new(recv_stream, LengthDelimitedCodec::new());
