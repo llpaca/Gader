@@ -34,7 +34,6 @@ impl Display for LogEntry {
 pub enum NetworkPacket {
     Handshake {
         secret_token: String,
-        version: u32,
     },
     HandshakeAck {
         accepted: bool,

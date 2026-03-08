@@ -10,11 +10,12 @@ use bollard::{API_DEFAULT_VERSION, Docker, query_parameters::LogsOptionsBuilder}
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use gader_agent::{
-    AppState, cert,
+    AppState, cert, config,
     parsers::{LogParser, immich, vaultwarden},
 };
 use gader_common::{LogEntry, NetworkPacket};
-use quinn::{Endpoint, ServerConfig, TransportConfig};
+use quinn::{Endpoint, IdleTimeout, ServerConfig, TransportConfig};
+use subtle::ConstantTimeEq;
 use tokio::sync::broadcast;
 use tokio_util::{
     codec::{FramedRead, FramedWrite, length_delimited::LengthDelimitedCodec},
@@ -36,7 +37,8 @@ async fn main() -> Result<()> {
     let server_endpoint = get_connection_endpoint().context("Error in making endpoint")?;
     info!("got server connection endpoint");
 
-    let state = Arc::new(AppState::default());
+    let secret = config::load_secret().context("Failed to load secret")?;
+    let state = Arc::new(AppState::new(150, secret));
 
     let (tx, _) = broadcast::channel::<LogEntry>(1000);
     let c_token = CancellationToken::new();
@@ -91,7 +93,8 @@ async fn main() -> Result<()> {
 }
 
 fn get_connection_endpoint() -> Result<Endpoint> {
-    let (cert_chain, key_der) = cert::load_or_generate_keys();
+    let (cert_chain, key_der) =
+        cert::load_or_generate_keys().context("Failed to load/generate TLS keys")?;
 
     let mut crypto = rustls::ServerConfig::builder()
         .with_no_client_auth()
@@ -106,6 +109,9 @@ fn get_connection_endpoint() -> Result<Endpoint> {
 
     let mut transport_config = TransportConfig::default();
     transport_config.keep_alive_interval(Some(Duration::from_secs(20)));
+    transport_config.max_idle_timeout(Some(
+        IdleTimeout::try_from(Duration::from_secs(60)).context("Invalid idle timeout")?,
+    ));
 
     let mut quic_server_config = ServerConfig::with_crypto(Arc::new(quic_crypto));
 
@@ -125,34 +131,54 @@ async fn spawn_watcher<P: LogParser>(
     state: Arc<AppState>,
 ) {
     info!("Watching: {}", name);
-    let params = LogsOptionsBuilder::new()
-        .follow(true)
-        .stderr(true)
-        .stdout(true)
-        .tail("30")
-        .build();
-
-    let mut stream = docker.logs(name, Some(params));
 
     loop {
-        tokio::select! {
-            recv_stream = stream.next() => {
-                match recv_stream {
-                    Some(Ok(log)) => {
-                        debug!("{:?}", log);
+        let params = LogsOptionsBuilder::new()
+            .follow(true)
+            .stderr(true)
+            .stdout(true)
+            .tail("30")
+            .build();
 
-                        if let Some(entry) = parser.parse(&log.to_string()) {
-                            debug!("Receiving logs!");
-                            state.add_log(entry.clone());
-                            let _ = tx.send(entry);
+        let mut stream = docker.logs(name, Some(params));
+
+        let should_retry = loop {
+            tokio::select! {
+                recv = stream.next() => {
+                    match recv {
+                        Some(Ok(log)) => {
+                            debug!("{:?}", log);
+                            if let Some(entry) = parser.parse(&log.to_string()) {
+                                debug!("Receiving logs!");
+                                state.add_log(entry.clone());
+                                let _ = tx.send(entry);
+                            }
+                        }
+                        Some(Err(e)) => {
+                            error!("Docker stream error for '{}': {}", name, e);
+                        }
+                        None => {
+                            info!("Docker log stream for '{}' ended — will retry in 5s", name);
+                            break true;
                         }
                     }
-                    Some(Err(e)) => error!("Docker stream error: {}", e),
-                    _ => {}
+                }
+                _ = c_token.cancelled() => {
+                    debug!("Watcher '{}' received cancel signal", name);
+                    break false;
                 }
             }
+        };
+
+        if !should_retry {
+            break;
+        }
+
+        // Wait before reconnecting, but respect cancellation.
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_secs(5)) => {}
             _ = c_token.cancelled() => {
-                debug!("Watcher {} received cancel signal", name);
+                debug!("Watcher '{}' cancelled during retry wait", name);
                 break;
             }
         }
@@ -167,16 +193,19 @@ async fn handle_client(
 ) {
     let connection = match conn.await {
         Ok(c) => {
-            debug!("Handshake successful");
+            debug!("Connected to a client");
             c
         }
         Err(e) => {
-            error!("Handshake failed: {}", e);
+            error!("Connection to client failed: {}", e);
             return;
         }
     };
 
-    info!("Client connected: {}", connection.remote_address());
+    info!(
+        "Client connected: {} === Starting Handshake",
+        connection.remote_address()
+    );
 
     let (send_stream, recv_stream) = match connection.accept_bi().await {
         Ok(s) => {
@@ -191,6 +220,50 @@ async fn handle_client(
 
     let mut writer = FramedWrite::new(send_stream, LengthDelimitedCodec::new());
     let mut reader = FramedRead::new(recv_stream, LengthDelimitedCodec::new());
+
+    let handshake_res = tokio::time::timeout(Duration::from_secs(3), reader.next()).await;
+
+    match handshake_res {
+        Ok(Some(Ok(bytes))) => match postcard::from_bytes::<NetworkPacket>(&bytes) {
+            Ok(NetworkPacket::Handshake { secret_token }) => {
+                if secret_token.as_bytes().ct_eq(state.secret.as_bytes()).into() {
+                    info!("Handshake successful for {}", connection.remote_address());
+                    let ack = NetworkPacket::HandshakeAck { accepted: true };
+                    if let Ok(data) = postcard::to_stdvec(&ack) {
+                        let _ = writer.send(Bytes::from(data)).await;
+                    }
+                } else {
+                    info!(
+                        "Wrong secret from {}. Aborting connection!",
+                        connection.remote_address()
+                    );
+                    let nack = NetworkPacket::HandshakeAck { accepted: false };
+                    if let Ok(data) = postcard::to_stdvec(&nack) {
+                        let _ = writer.send(Bytes::from(data)).await;
+                    }
+                    return;
+                }
+            }
+            _ => {
+                info!(
+                    "Invalid handshake packet from {}. Aborting connection!",
+                    connection.remote_address()
+                );
+                let nack = NetworkPacket::HandshakeAck { accepted: false };
+                if let Ok(data) = postcard::to_stdvec(&nack) {
+                    let _ = writer.send(Bytes::from(data)).await;
+                }
+                return;
+            }
+        },
+        _ => {
+            error!(
+                "Handshake timed out for client: {}",
+                connection.remote_address()
+            );
+            return;
+        }
+    }
 
     let mut rx = tx.subscribe();
     let mut batch: Vec<LogEntry> = Vec::with_capacity(10);

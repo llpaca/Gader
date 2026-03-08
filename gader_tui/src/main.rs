@@ -1,23 +1,24 @@
 #![allow(clippy::collapsible_if, clippy::collapsible_match)]
 use std::net::SocketAddr;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use gader_common::NetworkPacket;
 use gader_tui::{
     app::{Action, App},
-    get_endpoint, tui, ui,
+    config, get_endpoint, tui, ui,
 };
 use tokio_util::codec::{FramedRead, FramedWrite, length_delimited::LengthDelimitedCodec};
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    //tracing_subscriber::fmt::init(); // TODO: look into this
+    //tracing_subscriber::fmt::init(); // TODO: look into this -- make it write into a log file
     tui::install_panic_hook();
     let mut app = App::new();
 
+    let client_secret = config::load_secret().context("Failed to load client secret")?;
     let endpoint = get_endpoint()?;
 
     let server_addr: SocketAddr = "127.0.0.1:23456".parse()?;
@@ -42,10 +43,30 @@ async fn main() -> Result<()> {
     let mut writer = FramedWrite::new(send_stream, LengthDelimitedCodec::new());
     let mut reader = FramedRead::new(recv_stream, LengthDelimitedCodec::new());
 
-    // TODO: ideally this should be a handshake -- saved implement later
-    let init_packet = NetworkPacket::KeepAlive;
-    let init_bytes = postcard::to_stdvec(&init_packet)?;
-    writer.send(Bytes::from(init_bytes)).await?;
+    info!("Starting handshake");
+    let handshake = NetworkPacket::Handshake {
+        secret_token: client_secret,
+    };
+
+    writer
+        .send(Bytes::from(postcard::to_stdvec(&handshake)?))
+        .await?;
+
+    match reader.next().await {
+        Some(Ok(bytes)) => {
+            if let Ok(NetworkPacket::HandshakeAck { accepted: true }) = postcard::from_bytes(&bytes)
+            {
+                info!("Handshake accepted! Starting TUI");
+            } else {
+                info!("CLIENT_SECRET rejected by server");
+                bail!("Failed handshake");
+            }
+        }
+        _ => {
+            error!("Handshake with server failed! Connection Error");
+            bail!("Handshake network error")
+        }
+    }
 
     info!("Listening for logs...");
 

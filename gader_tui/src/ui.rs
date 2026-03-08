@@ -155,6 +155,10 @@ fn render_detail(f: &mut Frame, app: &App) {
             Span::styled("  Level     : ", Style::default().fg(Color::DarkGray)),
             Span::styled(log.level.to_string(), level_style(&log.level)),
         ]),
+        Line::from(vec![
+            Span::styled("  Context   : ", Style::default().fg(Color::DarkGray)),
+            Span::raw(log.context.to_string()),
+        ]),
         Line::from(""),
         Line::from(Span::styled(
             "  Message",
