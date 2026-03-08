@@ -8,7 +8,7 @@ use gader_common::LogEntry;
 
 /// holds the logs from different containers
 ///
-/// NOTE: Can optimise this later and keep the same API for convenience
+/// NOTE: Can optimize this later and keep the same API for convenience
 #[derive(Debug)]
 pub struct AppState {
     pub history: Mutex<VecDeque<LogEntry>>,

@@ -75,6 +75,7 @@ pub fn get_endpoint() -> Result<Endpoint> {
         .with_custom_certificate_verifier(Arc::new(SkipServerVerification))
         .with_no_client_auth();
 
+    // TODO: Improve this with TOFU cert pinning
     crypto.alpn_protocols = vec![b"gader-v1".to_vec()];
 
     let quic_client_config = quinn::crypto::rustls::QuicClientConfig::try_from(crypto)?;

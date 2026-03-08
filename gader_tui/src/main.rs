@@ -16,13 +16,17 @@ use tracing::{debug, error, info};
 #[derive(Parser)]
 #[command(name = "gader", about = "Gader TUI log viewer")]
 struct Args {
-    /// Gader agent address to connect to
     #[arg(short, long, default_value = "127.0.0.1:23456")]
     server: SocketAddr,
+
+    #[arg(long, default_value = "info")]
+    log_level: String,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let args = Args::parse();
+
     let home = std::env::var("HOME").context("HOME env var not set")?;
     let log_dir = std::path::PathBuf::from(home).join(".gader");
     std::fs::create_dir_all(&log_dir).context("Failed to create ~/.gader")?;
@@ -31,12 +35,15 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_writer(non_blocking)
         .with_ansi(false)
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&args.log_level)),
+        )
         .init();
 
     tui::install_panic_hook();
     let mut app = App::new();
 
-    let args = Args::parse();
     let client_secret = config::load_secret().context("Failed to load client secret")?;
     let endpoint = get_endpoint()?;
 

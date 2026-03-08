@@ -19,6 +19,6 @@ rustls = { version = "0.23.37", features = ["ring", "std"] }
 bytes = "1.11.1"
 tokio-util = { version = "0.7.18", features = ["codec"] }
 tracing = "0.1.44"
-tracing-subscriber = "0.3.22"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 subtle = "2.6.1"
 clap = { version = "4", features = ["derive"] }

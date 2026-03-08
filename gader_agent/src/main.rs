@@ -1,8 +1,4 @@
-use core::{
-    default::Default,
-    net::SocketAddr,
-    time::Duration,
-};
+use core::{default::Default, net::SocketAddr, time::Duration};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -27,20 +23,29 @@ use tracing::{debug, error, info};
 #[derive(Parser)]
 #[command(name = "gader-agent", about = "Gader log collection agent")]
 struct Args {
-    /// Address and port to listen on for TUI client connections
     #[arg(short, long, default_value = "0.0.0.0:23456")]
     listen: SocketAddr,
 
-    /// Docker HTTP endpoint URL
     #[arg(short, long, default_value = "http://127.0.0.1:2375")]
     docker: String,
+
+    #[arg(long, default_value_t = 150)]
+    history_size: usize,
+
+    #[arg(long, default_value = "info")]
+    log_level: String,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
-
     let args = Args::parse();
+
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&args.log_level)),
+        )
+        .init();
 
     rustls::crypto::ring::default_provider()
         .install_default()
@@ -49,11 +54,12 @@ async fn main() -> Result<()> {
     let docker_conn = Docker::connect_with_http(&args.docker, 5, API_DEFAULT_VERSION)
         .expect("Unable to connect to docker");
 
-    let server_endpoint = get_connection_endpoint(args.listen).context("Error in making endpoint")?;
+    let server_endpoint =
+        get_connection_endpoint(args.listen).context("Error in making endpoint")?;
     info!("got server connection endpoint");
 
     let secret = config::load_secret().context("Failed to load secret")?;
-    let state = Arc::new(AppState::new(150, secret));
+    let state = Arc::new(AppState::new(args.history_size, secret));
 
     let (tx, _) = broadcast::channel::<LogEntry>(1000);
     let c_token = CancellationToken::new();
@@ -101,7 +107,6 @@ async fn main() -> Result<()> {
         }
     }
 
-    // wait for all QUIC connections to send CONNECTION_CLOSE and drain cleanly
     server_endpoint.wait_idle().await;
 
     Ok(())
@@ -187,7 +192,6 @@ async fn spawn_watcher<P: LogParser>(
             break;
         }
 
-        // Wait before reconnecting, but respect cancellation.
         tokio::select! {
             _ = tokio::time::sleep(Duration::from_secs(5)) => {}
             _ = c_token.cancelled() => {

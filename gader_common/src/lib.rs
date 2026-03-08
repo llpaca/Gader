@@ -17,7 +17,7 @@ pub struct LogEntry {
 
 impl Display for LogEntry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Format: [2024-02-28 12:00] [IMMICH] [INFO] (Context) Message
+        // Format: [2024-02-28 12:00] [SERVICE] [INFO] (Context) Message
         write!(
             f,
             "[{}] [{}] [{}] ({}) {}",

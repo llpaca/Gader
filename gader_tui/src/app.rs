@@ -181,7 +181,6 @@ impl App {
             Action::Input(key) => {
                 if self.searching {
                     match key {
-                        // All printable chars (including space) feed the query.
                         KeyCode::Char(c) => {
                             self.search_query.push(c);
                             self.clamp_selection();
@@ -193,7 +192,6 @@ impl App {
                         KeyCode::Esc | KeyCode::Enter => {
                             self.searching = false;
                         }
-                        // Navigation still works with the bar open.
                         KeyCode::Down => self.next(),
                         KeyCode::Up => self.previous(),
                         _ => {}

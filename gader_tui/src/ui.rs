@@ -12,7 +12,7 @@ fn level_style(level: &str) -> Style {
     match level {
         "ERROR" | "FATAL" => Style::default().fg(Color::Red),
         "WARN" => Style::default().fg(Color::Yellow),
-        "INFO" => Style::default().fg(Color::Green),
+        "INFO" | "LOG" => Style::default().fg(Color::Green),
         "DEBUG" => Style::default().fg(Color::Blue),
         _ => Style::default().fg(Color::White),
     }
@@ -26,6 +26,40 @@ fn truncate(s: &str, max_chars: usize) -> String {
     } else {
         s.to_owned()
     }
+}
+
+fn highlight_truncated(text: &str, query: &str, max_chars: usize) -> Line<'static> {
+    let truncated = truncate(text, max_chars);
+    if query.is_empty() {
+        return Line::from(truncated);
+    }
+    let lower = truncated.to_ascii_lowercase();
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut cursor = 0usize;
+    while cursor < truncated.len() {
+        match lower[cursor..].find(query) {
+            Some(offset) => {
+                let start = cursor + offset;
+                let end = start + query.len();
+                if start > cursor {
+                    spans.push(Span::raw(truncated[cursor..start].to_owned()));
+                }
+                spans.push(Span::styled(
+                    truncated[start..end].to_owned(),
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ));
+                cursor = end;
+            }
+            None => break,
+        }
+    }
+    if cursor < truncated.len() {
+        spans.push(Span::raw(truncated[cursor..].to_owned()));
+    }
+    Line::from(spans)
 }
 
 pub fn view(f: &mut Frame, app: &mut App) {
@@ -54,6 +88,7 @@ fn render_table(f: &mut Frame, app: &mut App) {
     let follow = app.follow;
     let total_count = app.logs.len();
 
+    let search_lower = app.search_query.to_ascii_lowercase();
     let (visible_count, rows): (usize, Vec<Row>) = {
         let filtered = app.filtered_logs();
         let count = filtered.len();
@@ -65,7 +100,7 @@ fn render_table(f: &mut Frame, app: &mut App) {
                     Cell::from(log.timestamp.to_string()),
                     Cell::from(log.service.to_string()).style(Style::default().fg(Color::Magenta)),
                     Cell::from(log.level.to_string()).style(level_style(&log.level)),
-                    Cell::from(truncate(&log.message, 80)),
+                    Cell::from(highlight_truncated(&log.message, &search_lower, 80)),
                 ])
             })
             .collect();
@@ -126,7 +161,11 @@ fn render_table(f: &mut Frame, app: &mut App) {
 
     f.render_stateful_widget(table, chunks[1], &mut app.table_state);
 
-    let (search_chunk, footer_chunk) = if has_search { (Some(2usize), 3usize) } else { (None, 2) };
+    let (search_chunk, footer_chunk) = if has_search {
+        (Some(2usize), 3usize)
+    } else {
+        (None, 2)
+    };
 
     if let Some(idx) = search_chunk {
         let (text, style) = if app.searching {
