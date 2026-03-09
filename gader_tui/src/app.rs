@@ -4,7 +4,7 @@ use crossterm::event::KeyCode;
 use gader_common::{LogEntry, NetworkPacket};
 use ratatui::widgets::TableState;
 
-pub const LEVELS: &[&str] = &["All", "DEBUG", "INFO", "WARN", "ERROR"];
+pub const LEVELS: &[&str] = &["All", "DEBUG", "INFO", "WARN", "ERROR", "LOG"];
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum View {

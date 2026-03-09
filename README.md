@@ -15,8 +15,7 @@ A lightweight terminal log viewer for Docker containers. The agent runs on your
 server beside the Docker daemon and streams parsed, structured logs over QUIC to
 a TUI client on your machine.
 
-<img width="1920" height="1031" alt="image" src="../gader/assets/demo_1.png" />
-
+<img width="1920" height="1031" alt="demo_1" src="https://github.com/user-attachments/assets/cd259688-8826-4e8c-93ad-566cfabad034" />
 
 
 ### Simplified Architecture:
@@ -198,3 +197,9 @@ All files live in `~/.gader/` on the respective machine.
 | `server.cert`   | Server  | Self-signed TLS certificate |
 | `server.key`    | Server  | TLS private key             |
 | `tui_logs`      | Client  | TUI trace log file          |
+
+## AI Usage:
+
+Claude was used to generate boilerplate code for the tui.
+
+*Contributions are welcome!*
