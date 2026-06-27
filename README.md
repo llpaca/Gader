@@ -51,7 +51,7 @@ gader_common/  — shared types (LogEntry, NetworkPacket)
 
 ## Building
 
-Requires Rust nightly (see `rust-toolchain.toml`).
+Requires Rust stable (see `rust-toolchain.toml`).
 
 ```sh
 cargo build --release
