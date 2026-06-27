@@ -32,14 +32,8 @@ impl Display for LogEntry {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum NetworkPacket {
-    Handshake {
-        secret_token: String,
-    },
-    HandshakeAck {
-        accepted: bool,
-    },
+    Handshake { secret_token: String },
+    HandshakeAck { accepted: bool },
     Batch(Vec<LogEntry>),
-    UpdateFilter {
-        service: Option<String>,
-    },
+    UpdateFilter { service: Option<String> },
 }

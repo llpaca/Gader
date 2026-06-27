@@ -42,7 +42,7 @@ impl LogParser for VWParser {
         if !clean_line.trim().is_empty() {
             return Some(LogEntry {
                 service: "vaultwarden".into(),
-                timestamp: "Unknown".into(),
+                timestamp: "-".into(),
                 level: "RAW".into(),
                 context: "General".into(),
                 message: clean_line.into(),

@@ -29,6 +29,7 @@ impl TofuCertVerifier {
     }
 }
 
+#[allow(unused)]
 impl ServerCertVerifier for TofuCertVerifier {
     fn verify_server_cert(
         &self,

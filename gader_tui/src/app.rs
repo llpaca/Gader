@@ -66,8 +66,7 @@ impl App {
         if self.active_level != 0 {
             let target = LEVELS[self.active_level];
             let matches = log.level.eq_ignore_ascii_case(target)
-                || (target.eq_ignore_ascii_case("INFO")
-                    && log.level.eq_ignore_ascii_case("LOG"));
+                || (target.eq_ignore_ascii_case("INFO") && log.level.eq_ignore_ascii_case("LOG"));
             if !matches {
                 return false;
             }
@@ -178,6 +177,21 @@ impl App {
                         }
                     }
                     self.logs.extend(new_logs);
+
+                    const MAX_HISTORY: usize = 4000;
+                    if self.logs.len() > MAX_HISTORY {
+                        let to_remove = self.logs.len() - MAX_HISTORY;
+                        self.logs.drain(0..to_remove); // dropped immediately if not assigned
+                        // to a variable
+                        if let Some(selected) = self.table_state.selected() {
+                            if selected >= to_remove {
+                                self.table_state.select(Some(selected - to_remove));
+                            } else {
+                                self.table_state.select(Some(0));
+                            }
+                        }
+                    }
+
                     if self.follow {
                         self.jump_to_latest();
                     }
