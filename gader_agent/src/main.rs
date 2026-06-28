@@ -21,7 +21,7 @@ use tokio_util::{
 use tracing::{debug, error, info};
 
 #[derive(Parser)]
-#[command(name = "gader-agent", about = "Gader log collection agent")]
+#[command(name = "gader-agent", about = "Gader - log collection agent")]
 struct Args {
     #[arg(short, long, default_value = "0.0.0.0:23456")]
     listen: SocketAddr,

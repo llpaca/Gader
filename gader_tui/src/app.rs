@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc, time::Instant};
 
 use crossterm::event::KeyCode;
 use gader_common::{LogEntry, NetworkPacket};
@@ -24,6 +24,8 @@ pub struct App {
     pub follow: bool,
     pub view: View,
     pub outbox: Vec<NetworkPacket>,
+    pub log_counts: HashMap<Arc<str>, usize>,
+    pub last_window_reset: Instant,
 }
 
 pub enum Action {
@@ -45,6 +47,8 @@ impl App {
             follow: true,
             view: View::Table,
             outbox: Vec::new(),
+            log_counts: HashMap::new(),
+            last_window_reset: Instant::now(),
         }
     }
 
@@ -66,8 +70,7 @@ impl App {
         if self.active_level != 0 {
             let target = LEVELS[self.active_level];
             let matches = log.level.eq_ignore_ascii_case(target)
-                || (target.eq_ignore_ascii_case("INFO")
-                    && log.level.eq_ignore_ascii_case("LOG"));
+                || (target.eq_ignore_ascii_case("INFO") && log.level.eq_ignore_ascii_case("LOG"));
             if !matches {
                 return false;
             }
@@ -176,8 +179,49 @@ impl App {
                         if !self.known_services.contains(&log.service) {
                             self.known_services.push(Arc::clone(&log.service));
                         }
+                        let counter = self.log_counts.entry(Arc::clone(&log.service)).or_insert(0);
+                        *counter += 1;
                     }
+
                     self.logs.extend(new_logs);
+
+                    if self.last_window_reset.elapsed().as_secs() >= 10 {
+                        const ALERT_THRESHOLD: usize = 300;
+
+                        for (service, count) in &self.log_counts {
+                            if *count > ALERT_THRESHOLD {
+                                let alert_msg = format!(
+                                    "ALERT: Service '{}' spawned {} logs in 10 secs",
+                                    service, count
+                                );
+
+                                let _ = std::process::Command::new("notify-send")
+                                    .arg("Gader")
+                                    .arg(&alert_msg)
+                                    .arg("-u")
+                                    .arg("critical")
+                                    .spawn();
+                            }
+                        }
+
+                        self.log_counts.clear();
+                        self.last_window_reset = Instant::now();
+                    }
+
+                    const MAX_HISTORY: usize = 4000;
+                    if self.logs.len() > MAX_HISTORY {
+                        let to_remove = self.logs.len() - MAX_HISTORY;
+                        self.logs.drain(0..to_remove); // dropped immediately if not assigned
+                        // to a variable
+                        if let Some(selected) = self.table_state.selected() {
+                            if selected >= to_remove {
+                                self.table_state.select(Some(selected - to_remove));
+                            } else {
+                                self.table_state.select(Some(0));
+                            }
+                        }
+                    }
+
                     if self.follow {
                         self.jump_to_latest();
                     }

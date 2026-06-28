@@ -5,22 +5,29 @@ use anyhow::{Context, Result, bail};
 use bytes::Bytes;
 use clap::Parser;
 use futures::{SinkExt, StreamExt};
-use gader_common::NetworkPacket;
+use gader_common::{LogEntry, NetworkPacket};
 use gader_tui::{
     app::{Action, App},
     config, get_endpoint, tui, ui,
 };
+use tokio::{fs::OpenOptions, io::AsyncWriteExt, sync::mpsc};
 use tokio_util::codec::{FramedRead, FramedWrite, length_delimited::LengthDelimitedCodec};
 use tracing::{debug, error, info};
 
 #[derive(Parser)]
-#[command(name = "gader", about = "Gader TUI log viewer")]
+#[command(name = "Gader", version = "0.1", about = "Gader TUI log viewer")]
 struct Args {
     #[arg(short, long, default_value = "127.0.0.1:23456")]
     server: SocketAddr,
 
     #[arg(long, default_value = "info")]
     log_level: String,
+
+    #[arg(long, default_value_t = false)]
+    log_flush: bool,
+
+    #[arg(long, default_value = "gader_archive.log")]
+    flush_path: String,
 }
 
 #[tokio::main]
@@ -94,6 +101,34 @@ async fn main() -> Result<()> {
         }
     }
 
+    let (disk_tx, mut disk_rx) = mpsc::channel::<LogEntry>(4096);
+
+    if args.log_flush {
+        let flush_path = args.flush_path.clone();
+        tokio::spawn(async move {
+            let mut file = match OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&flush_path)
+                .await
+            {
+                Ok(f) => f,
+                Err(e) => {
+                    eprintln!("Failed to open flush file path: {:?}", e);
+                    return;
+                }
+            };
+
+            while let Some(entry) = disk_rx.recv().await {
+                let log_line = format!("{}\n", entry);
+                if let Err(e) = file.write_all(log_line.as_bytes()).await {
+                    eprintln!("Error writing log to disk background worker: {:?}", e);
+                    break;
+                }
+            }
+        });
+    }
+
     info!("Listening for logs...");
 
     while !app.should_quit {
@@ -103,6 +138,14 @@ async fn main() -> Result<()> {
             Some(msg_res) = reader.next() => {
                 if let Ok(bytes) = msg_res {
                      if let Ok(packet) = postcard::from_bytes(&bytes) {
+                         if args.log_flush {
+                             if let NetworkPacket::Batch(ref new_logs) = packet {
+                                 for log in new_logs {
+                                     // cheap pointer clone on the stack
+                                     let _ = disk_tx.send(log.clone()).await;
+                                 }
+                             }
+                         }
                          app.update(Action::Network(packet));
                      }
                 }
